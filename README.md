@@ -113,3 +113,74 @@ $ sudo vim /etc/hosts
 ブラウザを起動し、アドレス欄に`http://minikube.grafana`と入力し、下記の画面が出れば成功です。
 
 ![](https://raw.githubusercontent.com/NakamuraYosuke/Day08-helm/main/images/login.png)
+
+## TLSによるアクセス
+TLSでアクセスするためには、鍵、証明書署名リクエスト、及び証明書を作成します。
+
+まずは`loki-stack-grafana-ingress.key`という名前の鍵を作成します。
+```
+$ openssl genrsa -out loki-stack-grafana-ingress.key 2048
+```
+
+次に、`loki-stack-grafana-ingress.csr`という名前の証明書署名リクエストを作成します。
+
+CNには、Ingressリソースに設定したホスト名を設定します。
+```
+$ openssl req -new -key loki-stack-grafana-ingress.key -out loki-stack-grafana-ingress.csr -subj "/CN=minikube.grafana"
+```
+
+最後に証明書を作成します。
+上記で作成した鍵ファイルと証明書署名用リクエストを指定します。
+```
+$ openssl x509 -req -days 365 -in loki-stack-grafana-ingress.csr -signkey loki-stack-grafana-ingress.key -out loki-stack-grafana-ingress.crt
+```
+
+### TLS Secretの作成
+上記で作成した証明書と鍵をもとに、Secretを作成します。
+```
+$ kubectl create secret tls loki-stack-grafana-ingress-tls --cert loki-stack-grafana-ingress.crt --key loki-stack-grafana-ingress.key
+```
+
+### Ingressマニフェスト修正
+前段で作成した`loki-stack-grafana-ingress.yaml`を修正します。
+以下のように、`.spec.tls`に上記で作成したSecretを定義します。
+```
+  tls:
+  - secretName: loki-stack-grafana-ingress-tls
+```
+
+```
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: loki-stack-grafana-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  tls:
+  - secretName: loki-stack-grafana-ingress-tls
+  rules:
+    - host: minikube.grafana
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: loki-stack-grafana-nodeport
+              servicePort: 80
+```
+
+Ingressリソースを更新します。
+```
+$ kubectl apply -f loki-stack-grafana-ingress.yaml
+ingress.networking.k8s.io/loki-stack-grafana-ingress configured
+```
+
+Ingressリソースを確認します。
+```
+$ kubectl get ingress                                 
+NAME                         CLASS    HOSTS              ADDRESS        PORTS     AGE
+loki-stack-grafana-ingress   <none>   minikube.grafana   192.168.64.4   80, 443   89s
+```
+443ポートでアクセスできるようになりました。
+
+ブラウザを起動し、アドレス欄に`https://minikube.grafana`と入力しログイン画面が表示されればOKです。
