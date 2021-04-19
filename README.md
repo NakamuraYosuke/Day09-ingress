@@ -1,1 +1,115 @@
 # Day09-ingress
+本日はIngressを用いて外部から内部のServiceにアクセスする方法を紹介します。
+
+Ingressとは、クラスター内のServiceに外部からのアクセスを許可するルールを定義するAPIオブジェクトです。
+
+IngressコントローラーはIngress内に設定されたルールを満たすように動作します。
+
+## 事前作業
+minikubeを起動します。
+```
+$ minikube start
+```
+
+NGINX Ingressコントローラーを有効化します。
+```
+$ minikube addons enable ingress
+```
+
+NGINX Ingressコントローラーの起動状態を確認します。
+```
+$ kubectl get pods -n kube-system
+```
+
+前回のDay08で扱った`loki-stack`を利用するため、コンテキストを設定します。
+```
+$ kubectl config set-context minikube --namespace loki
+$ kubectl config use-context minikube
+```
+
+## NodePort Serviceの状態確認
+前回の演習の最後に、下記のNodePortのServiceを作成しました。
+```
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app.kubernetes.io/instance: loki-stack-1618807512
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: grafana
+    app.kubernetes.io/version: 6.7.0
+    helm.sh/chart: grafana-5.7.10
+  name: loki-stack-grafana-nodeport
+  namespace: loki
+spec:
+  ports:
+  - name: service
+    port: 80
+    protocol: TCP
+    targetPort: 3000
+  selector:
+    app.kubernetes.io/instance: loki-stack-1618807512
+    app.kubernetes.io/name: grafana
+  sessionAffinity: None
+  type: NodePort
+status:
+  loadBalancer: {}
+```
+この`loki-stack-grafana-nodeport` Serviceを確認します。
+```
+$ kubectl get svc loki-stack-grafana-nodeport
+NAME                          TYPE       CLUSTER-IP      EXTERNAL-IP   PORT(S)        AGE
+loki-stack-grafana-nodeport   NodePort   10.107.169.67   <none>        80:31970/TCP   7h43m
+```
+
+## Ingress作成
+以下のマニフェストを`loki-stack-grafana-ingress.yaml`という名前で保存します。
+```
+apiVersion: networking.k8s.io/v1beta1
+kind: Ingress
+metadata:
+  name: loki-stack-grafana-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  rules:
+    - host: minikube.grafana
+      http:
+        paths:
+          - path: /
+            backend:
+              serviceName: loki-stack-grafana-nodeport
+              servicePort: 80
+```
+
+`.spec.rules.host`に記載するホスト名称は任意の名前を指定してください。（世の中にないドメイン名で・・・）
+`serviceName`には`NodePortのService名`を、`servicePort`には`NodePortのPort番号`を設定します。
+
+保存し、Ingressリソースを作成します。
+```
+$ kubectl apply -f loki-stack-grafana-ingress.yaml
+ingress.networking.k8s.io/loki-stack-grafana-ingress created
+```
+
+Ingressリソースを確認します。
+```
+$ kubectl get ingress
+NAME                         CLASS    HOSTS              ADDRESS        PORTS   AGE
+loki-stack-grafana-ingress   <none>   minikube.grafana   192.168.64.4   80      35m
+```
+
+HOSTS列に先ほどのマニフェストで指定したホスト名が、ADDRESS列にはminikubeのIPアドレスが設定されていることを確認します。
+
+このホスト名はDNSに登録されているわけではありませんので、ブラウザからアクセス可能とするためhostsファイルに定義してあげます。
+
+```
+$ sudo vim /etc/hosts
+```
+以下を追記します。
+```
+192.168.64.4 minikube.grafana
+```
+
+ブラウザを起動し、アドレス欄に`http://minikube.grafana`と入力し、下記の画面が出れば成功です。
+
+![](https://raw.githubusercontent.com/NakamuraYosuke/Day08-helm/main/images/login.png)
