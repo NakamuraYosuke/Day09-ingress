@@ -28,6 +28,7 @@ $ kubectl config use-context minikube
 ```
 ## Ingress概要
 ![](https://raw.githubusercontent.com/NakamuraYosuke/Day09-ingress/main/images/ingress-nodeport.png)
+
 各物理ノードの NodePort に対してトラフィック振り分けを行なっています。
 
 ## NodePort Serviceの状態確認
